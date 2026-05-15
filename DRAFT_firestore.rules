@@ -1,0 +1,110 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Primitive Helpers
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+    
+    function isAdmin() {
+      // For bootstrapping, we can check if the user exists in a trusted admins list or if it's the first admin.
+      // But let's assume 'role: admin' in users collection dictates admin status.
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Validators
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'role', 'createdAt', 'updatedAt']) &&
+             data.email is string && data.email.size() <= 200 &&
+             data.role is string && data.role in ['admin', 'employee'] &&
+             data.createdAt == request.time &&
+             data.updatedAt == request.time;
+    }
+    
+    function isValidUserUpdate(data) {
+       return data.updatedAt == request.time;
+    }
+
+    function isValidAsset(data) {
+      return data.keys().hasAll(['name', 'code', 'category', 'status', 'condition', 'location', 'createdBy', 'createdAt', 'updatedAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             data.code is string && data.code.size() > 0 && data.code.size() <= 100 &&
+             data.category is string && data.category.size() > 0 && data.category.size() <= 100 &&
+             data.status is string && data.status in ['active', 'maintenance', 'retired'] &&
+             data.condition is string && data.condition.size() <= 100 &&
+             data.location is string && data.location.size() <= 200 &&
+             data.createdBy == request.auth.uid &&
+             data.createdAt == request.time &&
+             data.updatedAt == request.time;
+    }
+
+    function isValidAuditLog(data, assetId) {
+      return data.keys().hasAll(['assetId', 'action', 'performedBy', 'timestamp']) &&
+             data.assetId == assetId &&
+             data.action is string && data.action in ['create', 'update', 'delete'] &&
+             data.performedBy == request.auth.uid &&
+             data.timestamp == request.time;
+    }
+
+    // 1. Users
+    match /users/{userId} {
+      // Read: Users can read their own profile, Admins can read all
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      allow list: if isSignedIn() && isAdmin(); // Only admins can list users
+
+      // Create: Users can create their own profile. Role must be employee unless admin creates it.
+      // We will allow users to create 'employee' role initially to bootstrap.
+      allow create: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && 
+                    isValidUser(incoming()) && (incoming().role == 'employee' || isAdmin());
+      
+      // Update: Users can update their own profile, but NOT their role
+      allow update: if isSignedIn() && isValidId(userId) && isValidUserUpdate(incoming()) && (
+        (request.auth.uid == userId && incoming().diff(existing()).affectedKeys().hasOnly(['updatedAt'])) ||
+        (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly(['role', 'updatedAt']))
+      );
+    }
+
+    // 2. Assets
+    match /assets/{assetId} {
+      // Read: All signed in employees can read assets
+      allow get: if isSignedIn() && isValidId(assetId);
+      allow list: if isSignedIn();
+      
+      allow create: if isSignedIn() && isValidId(assetId) && isValidAsset(incoming());
+      allow update: if isSignedIn() && isValidId(assetId) && incoming().updatedAt == request.time && (
+        incoming().diff(existing()).affectedKeys().hasOnly(['name', 'category', 'status', 'condition', 'location', 'assignedTo', 'updatedAt'])
+      );
+      allow delete: if isAdmin() && isValidId(assetId);
+    }
+
+    // 3. Audit Logs
+    match /assets/{assetId}/audit_logs/{logId} {
+       allow get: if isSignedIn() && isValidId(assetId) && isValidId(logId);
+       allow list: if isSignedIn() && isValidId(assetId);
+       
+       allow create: if isSignedIn() && isValidId(assetId) && isValidId(logId) && isValidAuditLog(incoming(), assetId) &&
+                     exists(/databases/$(database)/documents/assets/$(assetId)); // Ensure asset exists
+       allow update, delete: if false; // Immutable
+    }
+  }
+}

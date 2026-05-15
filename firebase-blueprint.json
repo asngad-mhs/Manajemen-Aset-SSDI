@@ -1,0 +1,62 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "System user, usually an employee.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "description": "User email address" },
+        "role": { "type": "string", "enum": ["admin", "employee"], "description": "Role determining access level" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role", "createdAt", "updatedAt"]
+    },
+    "Asset": {
+      "title": "Asset",
+      "description": "An asset owned by SSDI.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "code": { "type": "string", "description": "Unique asset code" },
+        "category": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "maintenance", "retired"] },
+        "condition": { "type": "string" },
+        "purchaseDate": { "type": "string", "format": "date", "description": "Date of acquisition" },
+        "location": { "type": "string" },
+        "assignedTo": { "type": "string", "description": "User ID of the assignee" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "code", "category", "status", "condition", "location", "createdBy", "createdAt", "updatedAt"]
+    },
+    "AuditLog": {
+      "title": "Audit Log",
+      "description": "Trail of changes made to an asset.",
+      "type": "object",
+      "properties": {
+        "assetId": { "type": "string" },
+        "action": { "type": "string", "enum": ["create", "update", "delete"] },
+        "performedBy": { "type": "string", "description": "User ID who performed the action" },
+        "changes": { "type": "object", "description": "Stringified JSON of changes or diff" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["assetId", "action", "performedBy", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles and roles."
+    },
+    "/assets/{assetId}": {
+      "schema": { "$ref": "#/entities/Asset" },
+      "description": "Asset inventory."
+    },
+    "/assets/{assetId}/audit_logs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLog" },
+      "description": "Audit trails for a specific asset."
+    }
+  }
+}
